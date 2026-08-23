@@ -10,10 +10,10 @@
     <header class="app-header">
       <div class="title-row">
         <h1>标签页工作台</h1>
-        <select id="window-filter" aria-label="窗口范围">
+        <div class="header-actions"><button id="export-data" class="header-button" aria-label="导出数据">⇩</button><button id="import-data" class="header-button" aria-label="导入数据">⇧</button><input id="import-file" type="file" accept="application/json" hidden><select id="window-filter" aria-label="窗口范围">
           <option value="current">当前窗口</option>
           <option value="all">全部窗口</option>
-        </select>
+        </select></div>
       </div>
       <label class="search-box">
         <span>⌕</span>
@@ -36,8 +36,8 @@
 
       <section id="later-view" hidden>
         <div class="toolbar">
-          <span>按保存时间排序</span>
-          <button id="restore-all" class="link-button">全部恢复</button>
+          <select id="later-filter" aria-label="筛选稍后再看"><option value="all">全部记录</option><option value="notes">有备注</option><option value="grouped">来自分组</option></select>
+          <span><button id="restore-selected" class="link-button">恢复所选</button><button id="delete-selected" class="link-button danger-text">删除所选</button></span>
         </div>
         <div id="later-list"></div>
       </section>
@@ -51,6 +51,7 @@
         <label>原始标题<div id="original-title" class="read-only"></div></label>
         <label>当前 URL<div id="current-url" class="read-only url"></div></label>
         <label>备注<textarea id="note" rows="7" placeholder="记录进度、下一步或中断位置…"></textarea></label>
+        <label class="check-label"><input id="sync-title" type="checkbox"> 同时修改浏览器顶部标签标题</label>
         <div class="dialog-actions"><button value="cancel">取消</button><button id="save-tab" value="default" class="primary">保存</button></div>
       </form>
     </dialog>
