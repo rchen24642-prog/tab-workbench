@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>标签页工作台</title>
+    <link rel="stylesheet" href="sidepanel.css">
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="title-row">
+        <h1>标签页工作台</h1>
+        <select id="window-filter" aria-label="窗口范围">
+          <option value="current">当前窗口</option>
+          <option value="all">全部窗口</option>
+        </select>
+      </div>
+      <label class="search-box">
+        <span>⌕</span>
+        <input id="search" type="search" placeholder="搜索名称、备注、URL 或分组…">
+      </label>
+      <nav class="view-tabs" aria-label="内容范围">
+        <button class="active" data-view="open">当前打开 <span id="open-count">0</span></button>
+        <button data-view="later">稍后再看 <span id="later-count">0</span></button>
+      </nav>
+    </header>
+
+    <main>
+      <section id="open-view">
+        <div class="toolbar">
+          <span id="scope-label">当前窗口</span>
+          <button id="new-group" class="link-button">＋ 新建分组</button>
+        </div>
+        <div id="windows"></div>
+      </section>
+
+      <section id="later-view" hidden>
+        <div class="toolbar">
+          <span>按保存时间排序</span>
+          <button id="restore-all" class="link-button">全部恢复</button>
+        </div>
+        <div id="later-list"></div>
+      </section>
+    </main>
+
+    <dialog id="tab-dialog">
+      <form method="dialog" id="tab-form">
+        <header class="dialog-header"><h2>编辑标签页</h2><button value="cancel" aria-label="关闭">×</button></header>
+        <p class="hint">名称和备注仅绑定当前 URL</p>
+        <label>自定义名称<input id="custom-title" placeholder="留空则显示原始标题"></label>
+        <label>原始标题<div id="original-title" class="read-only"></div></label>
+        <label>当前 URL<div id="current-url" class="read-only url"></div></label>
+        <label>备注<textarea id="note" rows="7" placeholder="记录进度、下一步或中断位置…"></textarea></label>
+        <div class="dialog-actions"><button value="cancel">取消</button><button id="save-tab" value="default" class="primary">保存</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="group-dialog">
+      <form method="dialog" id="group-form">
+        <header class="dialog-header"><h2>修改分组</h2><button value="cancel" aria-label="关闭">×</button></header>
+        <label>分组名称<input id="group-title" placeholder="未命名分组"></label>
+        <label>分组颜色<select id="group-color"><option value="grey">灰色</option><option value="blue">蓝色</option><option value="red">红色</option><option value="yellow">黄色</option><option value="green">绿色</option><option value="pink">粉色</option><option value="purple">紫色</option><option value="cyan">青色</option><option value="orange">橙色</option></select></label>
+        <div class="dialog-actions"><button value="cancel">取消</button><button id="save-group" value="default" class="primary">保存</button></div>
+        <div class="danger-zone"><button type="button" id="later-group">整组稍后再看</button><button type="button" id="ungroup">取消分组，保留标签页</button></div>
+      </form>
+    </dialog>
+
+    <div id="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="sidepanel.js"></script>
+  </body>
+</html>

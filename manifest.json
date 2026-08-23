@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "标签页工作台",
+  "version": "0.1.0",
+  "description": "在 Chrome 侧边栏中管理标签页名称、备注、分组和稍后再看。",
+  "minimum_chrome_version": "114",
+  "permissions": ["tabs", "tabGroups", "storage", "sidePanel"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "side_panel": { "default_path": "sidepanel.html" },
+  "action": { "default_title": "打开标签页工作台" }
+}
