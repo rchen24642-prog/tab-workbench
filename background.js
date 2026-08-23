@@ -7,7 +7,8 @@ function originPattern(url) {
 
 async function applyCustomTitle(tabId, url) {
   const pattern = originPattern(url);
-  if (!pattern || !(await chrome.permissions.contains({ origins: [pattern] }))) return;
+  const titleAccess = await chrome.permissions.contains({ origins: ["http://*/*", "https://*/*"] });
+  if (!pattern || !titleAccess) return;
   const key = metaKey(tabId, url);
   const stored = await chrome.storage.local.get(key);
   const meta = stored[key];

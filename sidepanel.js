@@ -115,7 +115,7 @@ function renderTab(tab) {
   const favicon = tab.favIconUrl ? `<img class="favicon" src="${escapeHtml(tab.favIconUrl)}" alt="">` : `<span class="favicon favicon-fallback">${escapeHtml(title.slice(0, 1).toUpperCase())}</span>`;
   return `<article class="tab-item ${tab.active ? "active" : ""}" draggable="true" data-tab-id="${tab.id}">
     ${favicon}<div class="tab-copy" data-action="activate-tab"><div class="tab-title">${escapeHtml(title)} ${meta.note ? '<span class="note-dot">●</span>' : ""}</div><div class="tab-meta">${escapeHtml(hostOf(tab.url))}${meta.note ? ` · ${escapeHtml(meta.note)}` : ""}</div></div>
-    <div class="tab-actions"><button class="icon-button" data-action="copy" aria-label="复制 URL">⧉</button><button class="icon-button" data-action="edit-tab" aria-label="修改名称和备注">✎</button><button class="icon-button" data-action="later" aria-label="稍后再看">◷</button></div>
+    <div class="tab-actions"><button class="icon-button" data-action="copy" aria-label="复制 URL" title="复制 URL">⧉</button><button class="icon-button" data-action="edit-tab" aria-label="修改名称和备注" title="修改">✎</button><button class="icon-button" data-action="later" aria-label="稍后再看" title="稍后再看">◷</button><button class="icon-button delete-tab" data-action="delete-tab" aria-label="删除标签页" title="删除">×</button></div>
   </article>`;
 }
 
@@ -182,6 +182,10 @@ document.addEventListener("click", async (event) => {
     $("#custom-title").value = meta.customTitle || ""; $("#note").value = meta.note || ""; $("#sync-title").checked = Boolean(meta.syncTitle); $("#original-title").textContent = meta.originalTitle || tab.title || ""; $("#current-url").textContent = tab.url || ""; $("#tab-dialog").showModal();
   }
   if (action === "later") await putAside([tabId]);
+  if (action === "delete-tab") {
+    const tab = await chrome.tabs.get(tabId);
+    if (confirm(`确定关闭“${displayTitle(tab)}”吗？对应的自定义名称和备注也会删除。`)) { await chrome.tabs.remove(tabId); toast("✓ 标签页已删除"); }
+  }
   if (action === "toggle-group") {
     const groupId = Number(actionNode.closest(".group").dataset.groupId);
     if (groupId === NONE) actionNode.closest(".group").classList.toggle("collapsed"); else { const group = state.groups.get(groupId); await chrome.tabGroups.update(groupId, { collapsed: !group.collapsed }); }
@@ -198,8 +202,11 @@ document.addEventListener("change", (event) => { if (!event.target.classList.con
 $("#save-tab").addEventListener("click", async (event) => {
   event.preventDefault(); const tab = state.editingTab; if (!tab) return;
   const syncTitle = $("#sync-title").checked; const pattern = originPattern(tab.url); let syncGranted = false;
-  if (syncTitle && pattern) syncGranted = await chrome.permissions.request({ origins: [pattern] });
-  if (syncTitle && !syncGranted) toast("未获得当前网站权限，顶部标题不会修改");
+  if (syncTitle && pattern) {
+    syncGranted = await chrome.permissions.contains({ origins: ["http://*/*", "https://*/*"] });
+    if (!syncGranted) syncGranted = await chrome.permissions.request({ origins: ["http://*/*", "https://*/*"] });
+  }
+  if (syncTitle && !syncGranted) toast("未获得网页访问权限，顶部标题不会修改");
   const data = { tabId: tab.id, url: tab.url, customTitle: $("#custom-title").value.trim(), note: $("#note").value.trim(), originalTitle: tabMeta(tab).originalTitle || tab.title || "", syncTitle: syncGranted };
   await chrome.storage.local.set({ [metaKey(tab.id, tab.url)]: data }); $("#tab-dialog").close(); toast("✓ 名称和备注已保存"); await load();
   chrome.runtime.sendMessage({ type: "apply-title", tabId: tab.id, url: tab.url });
