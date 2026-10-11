@@ -10,7 +10,7 @@
     <header class="app-header">
       <div class="title-row">
         <h1>标签页工作台</h1>
-        <div class="header-actions"><button id="export-data" class="header-button" aria-label="导出数据">⇩</button><button id="import-data" class="header-button" aria-label="导入数据">⇧</button><input id="import-file" type="file" accept="application/json" hidden><select id="window-filter" aria-label="窗口范围">
+        <div class="header-actions"><button id="title-sync-toggle" class="header-button status-button" aria-label="检查顶部标题同步授权" title="检查顶部标题同步授权">◉</button><button id="multi-select-toggle" class="header-button" aria-label="多选未分组标签页" title="多选未分组标签页">☑</button><button id="export-data" class="header-button" aria-label="导出数据">⇩</button><button id="import-data" class="header-button" aria-label="导入数据">⇧</button><input id="import-file" type="file" accept="application/json" hidden><select id="window-filter" aria-label="窗口范围">
           <option value="current">当前窗口</option>
           <option value="all">全部窗口</option>
         </select></div>
@@ -31,6 +31,7 @@
           <span id="scope-label">当前窗口</span>
           <button id="new-group" class="link-button">＋ 新建分组</button>
         </div>
+        <div id="selection-toolbar" class="selection-toolbar" hidden><span>已选择 <strong id="selected-tab-count">0</strong> 个未分组标签页</span><span><button id="cancel-selection" class="link-button">取消</button><button id="group-selected" class="primary compact">移入新分组</button></span></div>
         <div id="windows"></div>
       </section>
 
@@ -51,8 +52,16 @@
         <label>原始标题<div id="original-title" class="read-only"></div></label>
         <label>当前 URL<div id="current-url" class="read-only url"></div></label>
         <label>备注<textarea id="note" rows="7" placeholder="记录进度、下一步或中断位置…"></textarea></label>
-        <label class="check-label"><input id="sync-title" type="checkbox"> 同时修改浏览器顶部标签标题（首次启用统一授权）</label>
         <div class="dialog-actions"><button value="cancel">取消</button><button id="save-tab" value="default" class="primary">保存</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="window-dialog">
+      <form method="dialog" id="window-form">
+        <header class="dialog-header"><h2>修改窗口</h2><button value="cancel" aria-label="关闭">×</button></header>
+        <label>窗口名称<input id="window-title" placeholder="例如：项目 A、资料窗口"></label>
+        <p class="hint">留空时恢复显示默认窗口编号</p>
+        <div class="dialog-actions"><button value="cancel">取消</button><button id="save-window" value="default" class="primary">保存</button></div>
       </form>
     </dialog>
 

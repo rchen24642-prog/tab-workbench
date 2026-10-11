@@ -1,12 +1,11 @@
 const META_PREFIX = "tabMeta:";
 const NONE = chrome.tabGroups.TAB_GROUP_ID_NONE;
-const state = { windows: [], groups: new Map(), meta: new Map(), later: [], selectedLater: new Set(), currentWindowId: null, view: "open", editingTab: null, editingGroup: null };
+const state = { windows: [], groups: new Map(), meta: new Map(), later: [], selectedLater: new Set(), selectedTabs: new Set(), selectionWindowId: null, selectionMode: false, windowNames: {}, titleSyncEnabled: false, titleSyncGranted: false, currentWindowId: null, view: "open", editingTab: null, editingGroup: null, editingWindowId: null };
 
 const $ = (selector) => document.querySelector(selector);
 const escapeHtml = (value = "") => String(value).replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char]);
 const metaKey = (tabId, url) => `${META_PREFIX}${tabId}:${encodeURIComponent(url || "")}`;
 const hostOf = (url) => { try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return url || "新标签页"; } };
-const originPattern = (url) => { try { const parsed = new URL(url); return ["http:", "https:"].includes(parsed.protocol) ? `${parsed.origin}/*` : null; } catch { return null; } };
 const colorMap = { grey: "#94a3b8", blue: "#3559d6", red: "#c24141", yellow: "#ca8a04", green: "#168467", pink: "#c44e72", purple: "#6d5dfc", cyan: "#0891b2", orange: "#d1662f" };
 
 let refreshTimer;
@@ -44,16 +43,21 @@ async function claimMetadata(tabs) {
 }
 
 async function load() {
-  const [windows, groups, focused, stored] = await Promise.all([
+  const [windows, groups, focused, stored, titleSyncGranted] = await Promise.all([
     chrome.windows.getAll({ populate: true, windowTypes: ["normal"] }),
     chrome.tabGroups.query({}),
     chrome.windows.getLastFocused({ windowTypes: ["normal"] }).catch(() => null),
-    chrome.storage.local.get({ laterRecords: [] })
+    chrome.storage.local.get({ laterRecords: [], windowNames: {}, titleSyncEnabled: false }),
+    chrome.permissions.contains({ origins: ["http://*/*", "https://*/*"] })
   ]);
   state.windows = windows;
   state.groups = new Map(groups.map((group) => [group.id, group]));
   state.currentWindowId = focused?.id ?? windows[0]?.id ?? null;
   state.later = stored.laterRecords || [];
+  state.windowNames = stored.windowNames || {};
+  state.titleSyncGranted = titleSyncGranted;
+  state.titleSyncEnabled = Boolean(stored.titleSyncEnabled && state.titleSyncGranted);
+  if (stored.titleSyncEnabled && !state.titleSyncGranted) await chrome.storage.local.set({ titleSyncEnabled: false });
   await claimMetadata(windows.flatMap((window) => window.tabs || []));
   render();
 }
@@ -69,6 +73,23 @@ function render() {
   $("#scope-label").textContent = $("#window-filter").value === "all" ? `${state.windows.length} 个窗口` : "当前窗口";
   renderWindows();
   renderLater();
+  renderTitleSyncStatus();
+  renderSelectionToolbar();
+}
+
+function renderTitleSyncStatus() {
+  const button = $("#title-sync-toggle");
+  button.classList.toggle("enabled", state.titleSyncEnabled);
+  button.classList.toggle("permission-missing", !state.titleSyncGranted);
+  button.textContent = state.titleSyncEnabled ? "✓" : "◉";
+  button.title = !state.titleSyncGranted ? "顶部标题同步未授权，点击启用并授权" : state.titleSyncEnabled ? "顶部标题同步已启用，点击关闭" : "已授权，点击启用顶部标题同步";
+  button.setAttribute("aria-label", button.title);
+}
+
+function renderSelectionToolbar() {
+  $("#selection-toolbar").hidden = !state.selectionMode;
+  $("#selected-tab-count").textContent = state.selectedTabs.size;
+  $("#multi-select-toggle").classList.toggle("enabled", state.selectionMode);
 }
 
 function renderWindows() {
@@ -103,8 +124,9 @@ function renderWindows() {
       </section>`;
     }).join("");
     if (!groupHtml) return "";
-    const label = window.id === state.currentWindowId ? `窗口 ${windowIndex + 1} · 正在使用` : `窗口 ${windowIndex + 1}`;
-    return `<section class="window" data-window-id="${window.id}"><div class="window-title"><span>${label}</span><span>${window.tabs?.length || 0} 个标签页</span></div>${groupHtml}</section>`;
+    const defaultLabel = window.id === state.currentWindowId ? `窗口 ${windowIndex + 1} · 正在使用` : `窗口 ${windowIndex + 1}`;
+    const label = state.windowNames[window.id] || defaultLabel;
+    return `<section class="window" data-window-id="${window.id}"><div class="window-title" data-window-id="${window.id}"><span class="window-name">${escapeHtml(label)}</span><span class="window-meta">${window.tabs?.length || 0} 个标签页 <button class="icon-button" data-action="edit-window" aria-label="修改窗口名称" title="修改窗口名称">✎</button></span></div>${groupHtml}</section>`;
   }).join("");
   if (!visibleTabs) container.innerHTML = `<div class="empty">${query ? "没有匹配的标签页" : "当前没有可管理的标签页"}</div>`;
 }
@@ -113,8 +135,10 @@ function renderTab(tab) {
   const meta = tabMeta(tab);
   const title = displayTitle(tab);
   const favicon = tab.favIconUrl ? `<img class="favicon" src="${escapeHtml(tab.favIconUrl)}" alt="">` : `<span class="favicon favicon-fallback">${escapeHtml(title.slice(0, 1).toUpperCase())}</span>`;
-  return `<article class="tab-item ${tab.active ? "active" : ""}" draggable="true" data-tab-id="${tab.id}">
-    ${favicon}<div class="tab-copy" data-action="activate-tab"><div class="tab-title">${escapeHtml(title)} ${meta.note ? '<span class="note-dot">●</span>' : ""}</div><div class="tab-meta">${escapeHtml(hostOf(tab.url))}${meta.note ? ` · ${escapeHtml(meta.note)}` : ""}</div></div>
+  const selectable = state.selectionMode && tab.groupId === NONE;
+  const selector = selectable ? `<input class="tab-select" type="checkbox" aria-label="选择标签页" ${state.selectedTabs.has(tab.id) ? "checked" : ""}>` : "";
+  return `<article class="tab-item ${tab.active ? "active" : ""} ${selectable ? "selectable" : ""}" draggable="true" data-tab-id="${tab.id}" data-window-id="${tab.windowId}">
+    ${selector}${favicon}<div class="tab-copy" data-action="${selectable ? "toggle-tab-selection" : "activate-tab"}"><div class="tab-title">${escapeHtml(title)} ${meta.note ? '<span class="note-dot">●</span>' : ""}</div><div class="tab-meta">${escapeHtml(hostOf(tab.url))}${meta.note ? ` · ${escapeHtml(meta.note)}` : ""}</div></div>
     <div class="tab-actions"><button class="icon-button" data-action="copy" aria-label="复制 URL" title="复制 URL">⧉</button><button class="icon-button" data-action="edit-tab" aria-label="修改名称和备注" title="修改">✎</button><button class="icon-button" data-action="later" aria-label="稍后再看" title="稍后再看">◷</button><button class="icon-button delete-tab" data-action="delete-tab" aria-label="删除标签页" title="删除">×</button></div>
   </article>`;
 }
@@ -175,11 +199,12 @@ document.addEventListener("click", async (event) => {
   const action = actionNode.dataset.action;
   const tabNode = actionNode.closest(".tab-item");
   const tabId = Number(tabNode?.dataset.tabId);
+  if (action === "toggle-tab-selection") toggleTabSelection(tabId, Number(tabNode.dataset.windowId));
   if (action === "activate-tab") { const tab = await chrome.tabs.get(tabId); await chrome.windows.update(tab.windowId, { focused: true }); await chrome.tabs.update(tabId, { active: true }); }
   if (action === "copy") { const tab = await chrome.tabs.get(tabId); await navigator.clipboard.writeText(tab.url); toast("✓ URL 已复制到剪贴板"); }
   if (action === "edit-tab") {
     const tab = await chrome.tabs.get(tabId); const meta = tabMeta(tab); state.editingTab = tab;
-    $("#custom-title").value = meta.customTitle || ""; $("#note").value = meta.note || ""; $("#sync-title").checked = Boolean(meta.syncTitle); $("#original-title").textContent = meta.originalTitle || tab.title || ""; $("#current-url").textContent = tab.url || ""; $("#tab-dialog").showModal();
+    $("#custom-title").value = meta.customTitle || ""; $("#note").value = meta.note || ""; $("#original-title").textContent = meta.originalTitle || tab.title || ""; $("#current-url").textContent = tab.url || ""; $("#tab-dialog").showModal();
   }
   if (action === "later") await putAside([tabId]);
   if (action === "delete-tab") {
@@ -194,28 +219,64 @@ document.addEventListener("click", async (event) => {
     const groupId = Number(actionNode.closest(".group").dataset.groupId); state.editingGroup = state.groups.get(groupId);
     $("#group-title").value = state.editingGroup.title || ""; $("#group-color").value = state.editingGroup.color; $("#group-dialog").showModal();
   }
+  if (action === "edit-window") {
+    state.editingWindowId = Number(actionNode.closest(".window").dataset.windowId);
+    $("#window-title").value = state.windowNames[state.editingWindowId] || "";
+    $("#window-dialog").showModal();
+  }
   if (action === "restore") { const record = state.later.find((item) => item.id === actionNode.closest(".later-item").dataset.recordId); await restoreRecords([record]); }
   if (action === "delete-record") { state.later = state.later.filter((item) => item.id !== actionNode.closest(".later-item").dataset.recordId); await saveLaterRecords(); toast("记录已删除"); }
 });
-document.addEventListener("change", (event) => { if (!event.target.classList.contains("later-select")) return; const id = event.target.closest(".later-item").dataset.recordId; if (event.target.checked) state.selectedLater.add(id); else state.selectedLater.delete(id); });
+document.addEventListener("change", (event) => {
+  if (event.target.classList.contains("later-select")) { const id = event.target.closest(".later-item").dataset.recordId; if (event.target.checked) state.selectedLater.add(id); else state.selectedLater.delete(id); }
+  if (event.target.classList.contains("tab-select")) toggleTabSelection(Number(event.target.closest(".tab-item").dataset.tabId), Number(event.target.closest(".tab-item").dataset.windowId), event.target.checked);
+});
 
-$("#save-tab").addEventListener("click", async (event) => {
+function toggleTabSelection(tabId, windowId, checked = !state.selectedTabs.has(tabId)) {
+  if (checked && state.selectionWindowId !== null && state.selectionWindowId !== windowId) return toast("一次只能选择同一窗口中的标签页");
+  if (checked) { state.selectedTabs.add(tabId); state.selectionWindowId = windowId; }
+  else { state.selectedTabs.delete(tabId); if (!state.selectedTabs.size) state.selectionWindowId = null; }
+  renderWindows();
+  renderSelectionToolbar();
+}
+
+$("#tab-form").addEventListener("submit", async (event) => {
+  if (event.submitter?.value === "cancel") return;
   event.preventDefault(); const tab = state.editingTab; if (!tab) return;
-  const syncTitle = $("#sync-title").checked; const pattern = originPattern(tab.url); let syncGranted = false;
-  if (syncTitle && pattern) {
-    syncGranted = await chrome.permissions.contains({ origins: ["http://*/*", "https://*/*"] });
-    if (!syncGranted) syncGranted = await chrome.permissions.request({ origins: ["http://*/*", "https://*/*"] });
-  }
-  if (syncTitle && !syncGranted) toast("未获得网页访问权限，顶部标题不会修改");
-  const data = { tabId: tab.id, url: tab.url, customTitle: $("#custom-title").value.trim(), note: $("#note").value.trim(), originalTitle: tabMeta(tab).originalTitle || tab.title || "", syncTitle: syncGranted };
+  const data = { tabId: tab.id, url: tab.url, customTitle: $("#custom-title").value.trim(), note: $("#note").value.trim(), originalTitle: tabMeta(tab).originalTitle || tab.title || "" };
   await chrome.storage.local.set({ [metaKey(tab.id, tab.url)]: data }); $("#tab-dialog").close(); toast("✓ 名称和备注已保存"); await load();
   chrome.runtime.sendMessage({ type: "apply-title", tabId: tab.id, url: tab.url });
 });
-$("#save-group").addEventListener("click", async (event) => { event.preventDefault(); if (!state.editingGroup) return; await chrome.tabGroups.update(state.editingGroup.id, { title: $("#group-title").value.trim(), color: $("#group-color").value }); $("#group-dialog").close(); toast("✓ 分组已更新"); });
+$("#group-form").addEventListener("submit", async (event) => { if (event.submitter?.value === "cancel") return; event.preventDefault(); if (!state.editingGroup) return; await chrome.tabGroups.update(state.editingGroup.id, { title: $("#group-title").value.trim(), color: $("#group-color").value }); $("#group-dialog").close(); toast("✓ 分组已更新"); });
+$("#window-form").addEventListener("submit", async (event) => { if (event.submitter?.value === "cancel") return; event.preventDefault(); if (state.editingWindowId === null) return; const title = $("#window-title").value.trim(); if (title) state.windowNames[state.editingWindowId] = title; else delete state.windowNames[state.editingWindowId]; await chrome.storage.local.set({ windowNames: state.windowNames }); $("#window-dialog").close(); toast("✓ 窗口名称已保存"); renderWindows(); });
 $("#later-group").addEventListener("click", async () => { if (!state.editingGroup) return; const tabs = await chrome.tabs.query({ groupId: state.editingGroup.id }); $("#group-dialog").close(); await putAside(tabs.map((tab) => tab.id), crypto.randomUUID()); });
 $("#ungroup").addEventListener("click", async () => { if (!state.editingGroup) return; const tabs = await chrome.tabs.query({ groupId: state.editingGroup.id }); await chrome.tabs.ungroup(tabs.map((tab) => tab.id)); $("#group-dialog").close(); toast("✓ 已取消分组"); });
 
 $("#new-group").addEventListener("click", async () => { const [active] = await chrome.tabs.query({ active: true, windowId: state.currentWindowId }); if (!active) return; const title = prompt("新分组名称", "新分组"); if (title === null) return; const groupId = await chrome.tabs.group({ tabIds: [active.id] }); await chrome.tabGroups.update(groupId, { title: title.trim(), color: "purple" }); });
+$("#title-sync-toggle").addEventListener("click", async () => {
+  let granted = await chrome.permissions.contains({ origins: ["http://*/*", "https://*/*"] });
+  if (!granted) granted = await chrome.permissions.request({ origins: ["http://*/*", "https://*/*"] });
+  if (!granted) { state.titleSyncGranted = false; state.titleSyncEnabled = false; await chrome.storage.local.set({ titleSyncEnabled: false }); renderTitleSyncStatus(); return toast("未获得网页访问权限，顶部标题同步未启用"); }
+  state.titleSyncGranted = true;
+  state.titleSyncEnabled = !state.titleSyncEnabled;
+  await chrome.storage.local.set({ titleSyncEnabled: state.titleSyncEnabled });
+  renderTitleSyncStatus();
+  chrome.runtime.sendMessage({ type: "apply-all-titles" });
+  toast(state.titleSyncEnabled ? "✓ 顶部标题同步已启用" : "顶部标题同步已关闭");
+});
+$("#multi-select-toggle").addEventListener("click", () => { state.selectionMode = !state.selectionMode; if (!state.selectionMode) { state.selectedTabs.clear(); state.selectionWindowId = null; } render(); });
+$("#cancel-selection").addEventListener("click", () => { state.selectionMode = false; state.selectedTabs.clear(); state.selectionWindowId = null; render(); });
+$("#group-selected").addEventListener("click", async () => {
+  if (!state.selectedTabs.size) return toast("请先选择未分组标签页");
+  const title = prompt("新分组名称", "新分组");
+  if (title === null) return;
+  const tabIds = [...state.selectedTabs];
+  const groupId = await chrome.tabs.group({ tabIds });
+  await chrome.tabGroups.update(groupId, { title: title.trim(), color: "purple" });
+  state.selectionMode = false; state.selectedTabs.clear(); state.selectionWindowId = null;
+  toast(`✓ ${tabIds.length} 个标签页已移入新分组`);
+  await load();
+});
 $("#later-filter").addEventListener("change", renderLater);
 $("#restore-selected").addEventListener("click", () => { const selected = state.later.filter((record) => state.selectedLater.has(record.id)); if (!selected.length) return toast("请先选择记录"); restoreRecords(selected); });
 $("#delete-selected").addEventListener("click", async () => { if (!state.selectedLater.size) return toast("请先选择记录"); state.later = state.later.filter((record) => !state.selectedLater.has(record.id)); state.selectedLater.clear(); await saveLaterRecords(); toast("✓ 已删除所选记录"); });
@@ -226,11 +287,38 @@ $("#import-data").addEventListener("click", () => $("#import-file").click());
 $("#import-file").addEventListener("change", async (event) => { const file = event.target.files[0]; if (!file) return; try { const parsed = JSON.parse(await file.text()); if (parsed.format !== "tab-workbench" || !parsed.data || typeof parsed.data !== "object") throw new Error("文件格式不正确"); if (!confirm("导入会合并数据，并用同名记录覆盖现有内容。继续吗？")) return; const existing = await chrome.storage.local.get({ laterRecords: [] }); const importedLater = parsed.data.laterRecords || []; const laterMap = new Map([...existing.laterRecords, ...importedLater].map((record) => [record.id, record])); await chrome.storage.local.set({ ...parsed.data, laterRecords: [...laterMap.values()] }); toast("✓ 数据导入完成"); await load(); } catch (error) { toast(`导入失败：${error.message}`); } finally { event.target.value = ""; } });
 document.querySelectorAll(".view-tabs button").forEach((button) => button.addEventListener("click", () => { document.querySelectorAll(".view-tabs button").forEach((node) => node.classList.toggle("active", node === button)); state.view = button.dataset.view; $("#open-view").hidden = state.view !== "open"; $("#later-view").hidden = state.view !== "later"; }));
 
+document.querySelectorAll("dialog form").forEach((form) => form.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" || event.isComposing || event.shiftKey) return;
+  event.preventDefault();
+  form.requestSubmit();
+}));
+
 let draggedTabId = null;
-document.addEventListener("dragstart", (event) => { const item = event.target.closest(".tab-item"); if (!item) return; draggedTabId = Number(item.dataset.tabId); item.classList.add("dragging"); event.dataTransfer.effectAllowed = "move"; });
-document.addEventListener("dragend", (event) => { event.target.closest(".tab-item")?.classList.remove("dragging"); document.querySelectorAll(".drop-target").forEach((node) => node.classList.remove("drop-target")); draggedTabId = null; });
-document.addEventListener("dragover", (event) => { const group = event.target.closest(".group"); if (!group || !draggedTabId) return; event.preventDefault(); document.querySelectorAll(".group").forEach((node) => node.classList.toggle("drop-target", node === group)); document.querySelectorAll(".tab-item").forEach((node) => node.classList.remove("drop-before", "drop-after")); const target = event.target.closest(".tab-item"); if (target && Number(target.dataset.tabId) !== draggedTabId) target.classList.add(event.clientY < target.getBoundingClientRect().top + target.offsetHeight / 2 ? "drop-before" : "drop-after"); });
-document.addEventListener("drop", async (event) => { const group = event.target.closest(".group"); if (!group || !draggedTabId) return; event.preventDefault(); const targetNode = event.target.closest(".tab-item"); const targetTab = targetNode ? await chrome.tabs.get(Number(targetNode.dataset.tabId)) : null; const groupId = Number(group.dataset.groupId); if (groupId === NONE) await chrome.tabs.ungroup([draggedTabId]); else await chrome.tabs.group({ groupId, tabIds: [draggedTabId] }); if (targetTab && targetTab.id !== draggedTabId) { const after = targetNode.classList.contains("drop-after"); await chrome.tabs.move(draggedTabId, { index: targetTab.index + (after ? 1 : 0) }); } toast(`✓ 已移动到「${group.querySelector(".group-name").textContent}」`); draggedTabId = null; scheduleRefresh(); });
+let pressStartedAt = 0;
+document.addEventListener("pointerdown", (event) => { if (event.target.closest(".tab-item") && !event.target.closest("button,input")) pressStartedAt = performance.now(); });
+document.addEventListener("dragstart", (event) => { const item = event.target.closest(".tab-item"); if (!item || state.selectionMode) return event.preventDefault(); if (performance.now() - pressStartedAt < 350) { toast("长按标签页后再拖动"); return event.preventDefault(); } draggedTabId = Number(item.dataset.tabId); item.classList.add("dragging"); event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", String(draggedTabId)); });
+document.addEventListener("dragend", (event) => { event.target.closest(".tab-item")?.classList.remove("dragging"); document.querySelectorAll(".drop-target").forEach((node) => node.classList.remove("drop-target")); document.querySelectorAll(".tab-item").forEach((node) => node.classList.remove("drop-before", "drop-after")); draggedTabId = null; });
+document.addEventListener("dragover", (event) => { const group = event.target.closest(".group"); const windowTitle = event.target.closest(".window-title"); if ((!group && !windowTitle) || !draggedTabId) return; event.preventDefault(); document.querySelectorAll(".group,.window-title").forEach((node) => node.classList.toggle("drop-target", node === (group || windowTitle))); document.querySelectorAll(".tab-item").forEach((node) => node.classList.remove("drop-before", "drop-after")); const target = event.target.closest(".tab-item"); if (target && Number(target.dataset.tabId) !== draggedTabId) target.classList.add(event.clientY < target.getBoundingClientRect().top + target.offsetHeight / 2 ? "drop-before" : "drop-after"); });
+document.addEventListener("drop", async (event) => {
+  const group = event.target.closest(".group"); const windowTitle = event.target.closest(".window-title");
+  if ((!group && !windowTitle) || !draggedTabId) return;
+  event.preventDefault();
+  const targetWindowId = Number((group || windowTitle).dataset.windowId);
+  const sourceTab = await chrome.tabs.get(draggedTabId);
+  const targetNode = event.target.closest(".tab-item");
+  const targetTab = targetNode ? await chrome.tabs.get(Number(targetNode.dataset.tabId)) : null;
+  if (sourceTab.windowId !== targetWindowId) await chrome.tabs.move(draggedTabId, { windowId: targetWindowId, index: targetTab?.index ?? -1 });
+  if (group) {
+    const groupId = Number(group.dataset.groupId);
+    if (groupId === NONE) await chrome.tabs.ungroup([draggedTabId]); else await chrome.tabs.group({ groupId, tabIds: [draggedTabId] });
+    if (targetTab && targetTab.id !== draggedTabId) { const after = targetNode.classList.contains("drop-after"); await chrome.tabs.move(draggedTabId, { index: targetTab.index + (after ? 1 : 0) }); }
+    toast(`✓ 已移动到「${group.querySelector(".group-name").textContent}」`);
+  } else {
+    await chrome.tabs.ungroup([draggedTabId]).catch(() => {});
+    toast("✓ 已移动到目标窗口");
+  }
+  draggedTabId = null; scheduleRefresh();
+});
 
 chrome.runtime.onMessage.addListener(() => scheduleRefresh());
 load().catch((error) => { console.error(error); $("#windows").innerHTML = `<div class="empty">加载失败：${escapeHtml(error.message)}</div>`; });

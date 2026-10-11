@@ -1,14 +1,26 @@
 {
   "manifest_version": 3,
   "name": "标签页工作台",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "在 Chrome 侧边栏中管理标签页名称、备注、分组和稍后再看。",
   "minimum_chrome_version": "114",
   "permissions": ["tabs", "tabGroups", "storage", "sidePanel", "scripting"],
   "optional_host_permissions": ["http://*/*", "https://*/*"],
   "background": { "service_worker": "background.js", "type": "module" },
   "side_panel": { "default_path": "sidepanel.html" },
-  "action": { "default_title": "打开标签页工作台" },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "action": {
+    "default_title": "打开标签页工作台",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png"
+    }
+  },
   "commands": {
     "_execute_action": { "suggested_key": { "default": "Ctrl+Shift+Y", "mac": "Command+Shift+Y" } },
     "save-active-for-later": {

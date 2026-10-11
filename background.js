@@ -7,13 +7,14 @@ function originPattern(url) {
 
 async function applyCustomTitle(tabId, url) {
   const pattern = originPattern(url);
+  const { titleSyncEnabled = false } = await chrome.storage.local.get({ titleSyncEnabled: false });
   const titleAccess = await chrome.permissions.contains({ origins: ["http://*/*", "https://*/*"] });
   if (!pattern || !titleAccess) return;
   const key = metaKey(tabId, url);
   const stored = await chrome.storage.local.get(key);
   const meta = stored[key];
   if (!meta) return;
-  const title = meta.syncTitle && meta.customTitle ? meta.customTitle : "";
+  const title = titleSyncEnabled && meta.customTitle ? meta.customTitle : "";
   await chrome.scripting.executeScript({ target: { tabId }, func: (customTitle, savedOriginal) => {
     const root = document.documentElement;
     if (!root.dataset.tabWorkbenchOriginalTitle) root.dataset.tabWorkbenchOriginalTitle = savedOriginal || document.title;
@@ -39,6 +40,7 @@ function broadcast(type = "tabs-changed") {
 
 chrome.runtime.onMessage.addListener((message) => {
   if (message?.type === "apply-title") applyCustomTitle(message.tabId, message.url);
+  if (message?.type === "apply-all-titles") chrome.tabs.query({}).then((tabs) => Promise.all(tabs.map((tab) => applyCustomTitle(tab.id, tab.url))));
 });
 
 async function deleteTabMetadata(tabId) {
@@ -58,7 +60,11 @@ chrome.tabs.onRemoved.addListener((tabId, removeInfo) => {
   else broadcast();
 });
 chrome.windows.onCreated.addListener(() => broadcast());
-chrome.windows.onRemoved.addListener(() => broadcast());
+chrome.windows.onRemoved.addListener(async (windowId) => {
+  const { windowNames = {} } = await chrome.storage.local.get({ windowNames: {} });
+  if (windowNames[windowId]) { delete windowNames[windowId]; await chrome.storage.local.set({ windowNames }); }
+  broadcast();
+});
 chrome.windows.onFocusChanged.addListener(() => broadcast("focused-window-changed"));
 chrome.tabGroups.onCreated.addListener(() => broadcast());
 chrome.tabGroups.onUpdated.addListener(() => broadcast());
